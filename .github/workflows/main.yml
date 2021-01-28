@@ -9,8 +9,30 @@ on:
       - master
 
 jobs:
-  test:
-    name: Tests & coverage
+  test-code-style:
+    name: Code style tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.6, 3.7, 3.8, 3.9]
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v1
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: |
+          pip install .
+          pip install -r requirements-dev.txt
+      - name: Run flake8
+        run: flake8 mashumaro
+      - name: Run black
+        run: black --check .
+  test-posix:
+    name: Tests on Posix
+    needs:
+      - test-code-style
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -24,18 +46,46 @@ jobs:
     - name: Install dependencies
       run: |
         pip install .
-        pip install pytest-cov coveralls
+        pip install -r requirements-dev.txt
     - name: Run tests with coverage
       run: pytest --cov=.
     - name: Upload Coverage
-      run: coveralls
+      run: coveralls --service=github
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        COVERALLS_FLAG_NAME: ${{ matrix.python-version }}
+        COVERALLS_FLAG_NAME: posix-${{ matrix.python-version }}
+        COVERALLS_PARALLEL: true
+  test-windows:
+    name: Tests on Windows
+    needs:
+      - test-code-style
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        python-version: [3.6, 3.7, 3.8, 3.9]
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v1
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install dependencies
+      run: |
+        pip install .
+        pip install -r requirements-dev.txt
+    - name: Run tests with coverage
+      run: pytest --cov=.
+    - name: Upload Coverage
+      run: coveralls --service=github
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        COVERALLS_FLAG_NAME: windows-${{ matrix.python-version }}
         COVERALLS_PARALLEL: true
   coveralls:
     name: Finish Coveralls
-    needs: test
+    needs:
+    - test-posix
+    - test-windows
     runs-on: ubuntu-latest
     steps:
     - name: Set up Python
@@ -45,6 +95,6 @@ jobs:
     - name: Install dependencies
       run: pip install coveralls
     - name: Finish coveralls
-      run: coveralls --finish
+      run: coveralls --service=github --finish
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

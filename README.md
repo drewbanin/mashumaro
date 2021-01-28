@@ -22,7 +22,18 @@ Table of contents
 * [Usage example](#usage-example)
 * [How does it work?](#how-does-it-work)
 * [API](#api)
-* [User defined classes](#user-defined-classes)
+* [Customization](#customization)
+    * [User defined classes](#user-defined-classes)
+        * [Serializable Interface](#serializable-interface)
+        * [Serialization Strategy](#serialization-strategy)
+    * [Field options](#field-options)
+        * [`serialize` option](#serialize-option)
+        * [`deserialize` option](#deserialize-option)
+    * [Serialization hooks](#serialization-hooks)
+        * [Before deserialization](#before-deserialization)
+        * [After deserialization](#after-deserialization)
+        * [Before serialization](#before-serialization)
+        * [After serialization](#after-serialization)
 
 Installation
 --------------------------------------------------------------------------------
@@ -38,10 +49,10 @@ Supported serialization formats
 This framework adds methods for dumping to and loading from the
 following formats:
 
-* plain dict
-* json
-* yaml
-* msgpack
+* [plain dict](https://docs.python.org/3/library/stdtypes.html#mapping-types-dict)
+* [JSON](https://www.json.org)
+* [YAML](https://yaml.org)
+* [MessagePack](https://msgpack.org)
 
 Plain dict can be useful when you need to pass a dict object to a
 third-party library, such as a client for MongoDB.
@@ -50,51 +61,65 @@ Supported field types
 --------------------------------------------------------------------------------
 
 There is support for generic types from the standard *typing* module:
-* List
-* Tuple
-* Set
-* FrozenSet
-* Deque
-* Dict
-* Mapping
-* MutableMapping
-* ChainMap
-* Sequence
+* `List`
+* `Tuple`
+* `Set`
+* `FrozenSet`
+* `Deque`
+* `Dict`
+* `Mapping`
+* `MutableMapping`
+* `ChainMap`
+* `Sequence`
 
 for special primitives from the *typing* module:
-* Optional
-* Any
+* `Optional`
+* `Any`
 
 for enumerations based on classes from the standard *enum* module:
-* Enum
-* IntEnum
-* Flag
-* IntFlag
+* `Enum`
+* `IntEnum`
+* `Flag`
+* `IntFlag`
 
 for common built-in types:
-* int
-* float
-* bool
-* str
-* bytes
-* bytearray
+* `int`
+* `float`
+* `bool`
+* `str`
+* `bytes`
+* `bytearray`
 
-for built-in datetime oriented types:
-* datetime
-* date
-* time
-* timedelta
-* timezone
+for built-in datetime oriented types (see [more](#deserialize-option) details):
+* `datetime`
+* `date`
+* `time`
+* `timedelta`
+* `timezone`
+
+for pathlike types:
+* `PurePath`
+* `Path`
+* `PurePosixPath`
+* `PosixPath`
+* `PureWindowsPath`
+* `WindowsPath`
+* `os.PathLike`
+
 
 for other less popular built-in types:
-* uuid.UUID
-* decimal.Decimal
-* fractions.Fraction
-* os.PathLike (loads to Path)
+* `uuid.UUID`
+* `decimal.Decimal`
+* `fractions.Fraction`
+* `ipaddress.IPv4Address`
+* `ipaddress.IPv6Address`
+* `ipaddress.IPv4Network`
+* `ipaddress.IPv6Network`
+* `ipaddress.IPv4Interface`
+* `ipaddress.IPv6Interface`
 
 for specific types like *NoneType*, nested dataclasses itself and
 even [user defined classes](#user-defined-classes).
-
 
 Usage example
 --------------------------------------------------------------------------------
@@ -228,11 +253,17 @@ dict_params    # dictionary of parameter values passed underhood to `from_dict` 
 decoder_kwargs # keyword arguments for decoder function
 ```
 
-User defined classes
+Customization
 --------------------------------------------------------------------------------
 
+### User defined classes
+
 You can define and use custom classes with *mashumaro*. There are two options
-for customization. The first one is useful when you already have the separate
+for customization.
+
+#### Serializable Interface
+
+The first one is useful when you already have the separate
 custom class and you want to serialize instances of it with *mashumaro*.
 All what you need is to implement *SerializableType* interface:
 
@@ -277,6 +308,8 @@ dictionary = new_year.to_dict()
 assert Holiday.from_dict(dictionary) == new_year
 ```
 
+#### Serialization Strategy
+
 The second option is useful when you want to change the serialization behaviour
 for a class depending on some defined parameters. For this case you can create
 the special class implementing *SerializationStrategy* interface:
@@ -313,11 +346,193 @@ dictionary = formats.to_dict()
 assert DateTimeFormats.from_dict(dictionary) == formats
 ```
 
+> ⚠️ Since PEP-563 [breaks](https://github.com/Fatal1ty/mashumaro/issues/10)
+> `SerializationStrategy`, it will be implemented differently sometime in a
+> future version 2.x.
+
+### Field options
+
+In some cases creating a new class just for one little thing could be
+excessive. You can use `dataclasses.field` as a field value and configure some
+serialization aspects through its `metadata` argument. Next section describes
+all supported options to use in `metadata` mapping.
+
+#### `serialize` option
+
+This option allows you to change the default serialization method through
+a value of type `Callable[[Any], Any]` that could be any callable object like
+a function, a class method, a class instance method, an instance of a callable
+class or even a lambda function.
+
+Example:
+
+```python
+@dataclass
+class A(DataClassDictMixin):
+    dt: datetime = field(
+        metadata={
+            "serialize": lambda v: v.strftime('%Y-%m-%d %H:%M:%S')
+        }
+    )
+```
+
+#### `deserialize` option
+
+This option allows you to change the default deserialization method. When using
+this option, the deserialization behaviour depends on what type of value the
+option has. It could be either `Callable[[Any], Any]` or `str`.
+
+A value of type `Callable[[Any], Any]` is a generic way to specify any callable
+object like a function, a class method, a class instance method, an instance
+of a callable class or even a lambda function to be called for deserialization.
+
+A value of type `str` sets a specific engine for deserialization. Keep in mind
+that all possible engines depend on the field type that this option is used
+with. At this moment there are next deserialization engines to choose from:
+
+| Applicable field types     | Supported engines        | Description
+|:-------------------------- |:-------------------------|:------------------------------|
+| `datetime`, `date`, `time` | [`ciso8601`](https://github.com/closeio/ciso8601#supported-subset-of-iso-8601), [`pendulum`](https://github.com/sdispater/pendulum) | How to parse datetime string. By default native [`fromisoformat`](https://docs.python.org/3/library/datetime.html#datetime.datetime.fromisoformat) of corresponding class will be used for `datetime`, `date` and `time` fields. It's the fastest way in most cases, but you can choose an alternative. |
+
+Example:
+
+```python
+from datetime import datetime
+from dataclasses import dataclass, field
+from typing import List
+from mashumaro import DataClassDictMixin
+import ciso8601
+import dateutil
+
+@dataclass
+class A(DataClassDictMixin):
+    x: datetime = field(
+        metadata={"deserialize": "pendulum"}
+    )
+
+class B(DataClassDictMixin):
+    x: datetime = field(
+        metadata={"deserialize": ciso8601.parse_datetime_as_naive}
+    )
+
+@dataclass
+class C(DataClassDictMixin):
+    dt: List[datetime] = field(
+        metadata={
+            "deserialize": lambda l: list(map(dateutil.parser.isoparse, l))
+        }
+    )
+```
+
+If you don't want to remember the names of the options you can use
+`field_params` helper function:
+
+```python
+from dataclasses import dataclass, field
+from mashumaro import DataClassDictMixin, field_options
+
+@dataclass
+class A(DataClassDictMixin):
+    x: int = field(
+        metadata=field_options(
+            serialize=str,
+            deserialize=int
+        )
+    )
+```
+
+More options are on the way. If you know which option would be useful for many,
+please don't hesitate to create an issue or pull request.
+
+### Serialization hooks
+
+In some cases you need to prepare input / output data or do some extraordinary
+actions at different stages of the deserialization / serialization lifecycle.
+You can do this with different types of hooks.
+
+#### Before deserialization
+
+For doing something with a dictionary that will be passed to deserialization
+you can use `__pre_deserialize__` class method:
+
+```python
+@dataclass
+class A(DataClassJSONMixin):
+    abc: int
+
+    @classmethod
+    def __pre_deserialize__(cls, d: Dict[Any, Any]) -> Dict[Any, Any]:
+        return {k.lower(): v for k, v in d.items()}
+
+print(DataClass.from_dict({"ABC": 123}))    # DataClass(abc=123)
+print(DataClass.from_json('{"ABC": 123}'))  # DataClass(abc=123)
+```
+
+#### After deserialization
+
+For doing something with a dataclass instance that was created as a result
+of deserialization you can use `__post_deserialize__` class method:
+
+```python
+@dataclass
+class A(DataClassJSONMixin):
+    abc: int
+
+    @classmethod
+    def __post_deserialize__(cls, obj: 'A') -> 'A':
+        obj.abc = 456
+        return obj
+
+print(DataClass.from_dict({"abc": 123}))    # DataClass(abc=456)
+print(DataClass.from_json('{"abc": 123}'))  # DataClass(abc=456)
+```
+
+#### Before serialization
+
+For doing something before serialization you can use `__pre_serialize__`
+method:
+
+```python
+@dataclass
+class A(DataClassJSONMixin):
+    abc: int
+    counter: ClassVar[int] = 0
+
+    def __pre_serialize__(self) -> 'A':
+        self.counter += 1
+        return self
+
+obj = DataClass(abc=123)
+obj.to_dict()
+obj.to_json()
+print(obj.counter)  # 2
+```
+
+#### After serialization
+
+For doing something with a dictionary that was created as a result of
+serialization you can use `__post_serialize__` method:
+
+```python
+@dataclass
+class A(DataClassJSONMixin):
+    user: str
+    password: str
+
+    def __post_serialize__(self, d: Dict[Any, Any]) -> Dict[Any, Any]:
+        d.pop('password')
+        return d
+
+obj = DataClass(user="name", password="secret")
+print(obj.to_dict())  # {"user": "name"}
+print(obj.to_json())  # '{"user": "name"}'
+```
+
 TODO
 --------------------------------------------------------------------------------
 
+* add Union support (try to match types on each call)
 * write benchmarks
 * add optional validation
-* add Union support (try to match types on each call)
 * write custom useful types such as URL, Email etc
 * write documentation
